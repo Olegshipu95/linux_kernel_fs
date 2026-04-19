@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/fs.h>
 #include <linux/string.h>
+#include <linux/blkdev.h>
 
 #include "simplefs.h"
 
@@ -9,13 +10,17 @@ static struct inode *simplefs_get_inode(struct super_block *sb,
 					umode_t mode, int i_ino)
 {
 	struct inode *inode = new_inode(sb);
+	struct timespec64 now;
 
 	if (!inode)
 		return NULL;
 
 	inode_init_owner(&nop_mnt_idmap, inode, dir, mode);
 	inode->i_ino = i_ino;
-	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+	now = current_time(inode);
+	inode_set_atime_to_ts(inode, now);
+	inode_set_mtime_to_ts(inode, now);
+	inode_set_ctime_to_ts(inode, now);
 	return inode;
 }
 
@@ -27,8 +32,9 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 	if (ino == SIMPLEFS_ROOT_INO) {
 		inode = simplefs_get_inode(sb, NULL, S_IFDIR | 0755,
 					   SIMPLEFS_ROOT_INO);
-		if (inode)
-			inode->i_op = &simplefs_dir_inode_ops;
+		if (!inode)
+			return ERR_PTR(-ENOMEM);
+		inode->i_op = &simplefs_dir_inode_ops;
 		inode->i_fop = &simplefs_dir_ops;
 		set_nlink(inode, 2);
 		return inode;
@@ -43,12 +49,12 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 
 	inode->i_op = &simplefs_inode_ops;
 	inode->i_fop = &simplefs_file_ops;
-	inode->i_size = sbi->max_file_sectors * sbi->sector_size;
+	inode->i_size = simplefs_file_data_size(sbi->max_file_sectors);
 	return inode;
 }
 
-static int simplefs_lookup(struct inode *dir, struct dentry *dentry,
-			   unsigned int flags)
+static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry,
+				      unsigned int flags)
 {
 	struct super_block *sb = dir->i_sb;
 	struct simplefs_sb_info *sbi = sb->s_fs_info;
@@ -67,12 +73,13 @@ static int simplefs_lookup(struct inode *dir, struct dentry *dentry,
 			struct inode *inode = simplefs_iget(sb, i + 2);
 
 			if (IS_ERR(inode))
-				return PTR_ERR(inode);
+				return ERR_CAST(inode);
 			d_add(dentry, inode);
-			return 0;
+			return NULL;
 		}
 	}
-	return -ENOENT;
+	d_add(dentry, NULL);
+	return NULL;
 }
 
 static int simplefs_readdir(struct file *file, struct dir_context *ctx)
@@ -89,7 +96,7 @@ static int simplefs_readdir(struct file *file, struct dir_context *ctx)
 		struct simplefs_file_meta meta;
 		int err;
 
-		if (i + 2 <= ctx->pos)
+		if (i + 2 < ctx->pos)
 			continue;
 
 		err = simplefs_read_file_meta(sb, i, &meta);
@@ -111,7 +118,7 @@ const struct inode_operations simplefs_dir_inode_ops = {
 
 const struct file_operations simplefs_dir_ops = {
 	.read = generic_read_dir,
-	.iterate = simplefs_readdir,
+	.iterate_shared = simplefs_readdir,
 	.llseek = generic_file_llseek,
 };
 
@@ -134,9 +141,7 @@ int simplefs_fill_super(struct super_block *sb, void *data, int silent)
 	sbi->sb_off2 = sb_offset2;
 	sbi->max_filename_len = max_filename_len;
 	sbi->max_file_sectors = max_file_sectors;
-	sbi->sector_size = bdev_logical_block_size(sbi->bdev);
-	if (!sbi->sector_size)
-		sbi->sector_size = 512;
+	sbi->sector_size = SIMPLEFS_SECTOR_SIZE;
 
 	err = simplefs_read_super(sbi, &sbi->sb);
 	if (err) {
@@ -149,8 +154,10 @@ int simplefs_fill_super(struct super_block *sb, void *data, int silent)
 
 	sb->s_fs_info = sbi;
 	sb->s_magic = SIMPLEFS_MAGIC;
-	sb->s_blocksize = sbi->sector_size;
-	sb->s_blocksize_bits = blksize_bits(sb->s_blocksize);
+	if (!sb_set_blocksize(sb, SIMPLEFS_BLOCK_SIZE)) {
+		kfree(sbi);
+		return -EINVAL;
+	}
 	sb->s_maxbytes = sbi->max_file_sectors * (u64)sbi->sector_size;
 	sb->s_op = simplefs_sops_ptr;
 

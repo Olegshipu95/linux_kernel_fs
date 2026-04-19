@@ -15,13 +15,15 @@ static int simplefs_read_sector(struct super_block *sb, u32 index, u32 sec_off,
 	struct simplefs_sb_info *sbi = sb->s_fs_info;
 	struct buffer_head *bh;
 	sector_t sec;
+	unsigned int off_in_block;
 
-	sec = sbi->data_start + index + sec_off;
-	bh = sb_bread(sbi->bdev, sec);
+	sec = simplefs_file_start(sbi, index) + sec_off;
+	bh = simplefs_bread_sb_sector(sb, sec);
 	if (!bh)
 		return -EIO;
 
-	memcpy(buf, bh->b_data + offset_in_sec, len);
+	off_in_block = simplefs_sector_block_offset(sec);
+	memcpy(buf, bh->b_data + off_in_block + offset_in_sec, len);
 	brelse(bh);
 	return 0;
 }
@@ -33,13 +35,15 @@ static int simplefs_write_sector(struct super_block *sb, u32 index, u32 sec_off,
 	struct simplefs_sb_info *sbi = sb->s_fs_info;
 	struct buffer_head *bh;
 	sector_t sec;
+	unsigned int off_in_block;
 
-	sec = sbi->data_start + index + sec_off;
-	bh = sb_bread(sbi->bdev, sec);
+	sec = simplefs_file_start(sbi, index) + sec_off;
+	bh = simplefs_bread_sb_sector(sb, sec);
 	if (!bh)
 		return -EIO;
 
-	memcpy(bh->b_data + offset_in_sec, buf, len);
+	off_in_block = simplefs_sector_block_offset(sec);
+	memcpy(bh->b_data + off_in_block + offset_in_sec, buf, len);
 	mark_buffer_dirty(bh);
 	sync_dirty_buffer(bh);
 	brelse(bh);
@@ -61,24 +65,21 @@ static ssize_t simplefs_read_file(struct file *file, char __user *buf,
 	if (err)
 		return err;
 
-	file_size = meta.sectors_used * sbi->sector_size;
+	file_size = simplefs_file_data_size(meta.sectors_used);
 	if (*ppos >= file_size)
 		return 0;
 	if (len > file_size - *ppos)
 		len = file_size - *ppos;
 
 	while (done < len) {
-		loff_t pos = *ppos + done;
-		u32 sec_off = pos / sbi->sector_size;
-		unsigned off = pos % sbi->sector_size;
+		u64 phys_pos = *ppos + done + SIMPLEFS_META_SIZE;
+		u32 sec_off = div_u64(phys_pos, sbi->sector_size);
+		unsigned off = do_div(phys_pos, sbi->sector_size);
 		unsigned chunk;
 		void *kbuf;
 
 		if (sec_off >= meta.sectors_used)
 			break;
-
-		if (sec_off == 0 && off < SIMPLEFS_META_SIZE)
-			off = SIMPLEFS_META_SIZE;
 
 		chunk = min_t(unsigned, len - done,
 			      sbi->sector_size - off);
@@ -118,21 +119,18 @@ static ssize_t simplefs_write_file(struct file *file, const char __user *buf,
 	if (err)
 		return err;
 
-	max_size = meta.sectors_used * sbi->sector_size;
+	max_size = simplefs_file_data_size(meta.sectors_used);
 	if (*ppos + len > max_size)
 		len = max_size - *ppos;
 	if ((ssize_t)len <= 0)
 		return 0;
 
 	while (done < len) {
-		loff_t pos = *ppos + done;
-		u32 sec_off = pos / sbi->sector_size;
-		unsigned off = pos % sbi->sector_size;
+		u64 phys_pos = *ppos + done + SIMPLEFS_META_SIZE;
+		u32 sec_off = div_u64(phys_pos, sbi->sector_size);
+		unsigned off = do_div(phys_pos, sbi->sector_size);
 		unsigned chunk;
 		void *kbuf;
-
-		if (sec_off == 0 && off < SIMPLEFS_META_SIZE)
-			off = SIMPLEFS_META_SIZE;
 
 		chunk = min_t(unsigned, len - done,
 			      sbi->sector_size - off);
@@ -154,7 +152,9 @@ static ssize_t simplefs_write_file(struct file *file, const char __user *buf,
 
 	meta.data_crc = cpu_to_le32(simplefs_data_crc(sb, index,
 						      sbi->max_filename_len));
-	simplefs_write_file_meta(sb, index, &meta);
+	err = simplefs_write_file_meta(sb, index, &meta);
+	if (err)
+		return err;
 
 	*ppos += done;
 	return done;

@@ -10,7 +10,36 @@
 #define SIMPLEFS_VERSION	1
 #define SIMPLEFS_ROOT_INO	1
 
+#define SIMPLEFS_SECTOR_SIZE	512
+#define SIMPLEFS_BLOCK_SIZE	4096
 #define SIMPLEFS_META_SIZE	128
+#ifndef SIMPLEFS_MAX_FILE_SECTORS
+#define SIMPLEFS_MAX_FILE_SECTORS 64
+#endif
+
+static inline sector_t simplefs_sector_to_block(sector_t sector)
+{
+	return sector / (SIMPLEFS_BLOCK_SIZE / SIMPLEFS_SECTOR_SIZE);
+}
+
+static inline unsigned int simplefs_sector_block_offset(sector_t sector)
+{
+	return (sector % (SIMPLEFS_BLOCK_SIZE / SIMPLEFS_SECTOR_SIZE)) *
+	       SIMPLEFS_SECTOR_SIZE;
+}
+
+static inline struct buffer_head *simplefs_bread_bdev_sector(
+	struct block_device *bdev, sector_t sector)
+{
+	return __bread(bdev, simplefs_sector_to_block(sector),
+		       SIMPLEFS_BLOCK_SIZE);
+}
+
+static inline struct buffer_head *simplefs_bread_sb_sector(
+	struct super_block *sb, sector_t sector)
+{
+	return sb_bread(sb, simplefs_sector_to_block(sector));
+}
 
 struct simplefs_super_block {
 	__le32 magic;
@@ -43,6 +72,17 @@ struct simplefs_sb_info {
 	u32 file_count;
 	u32 data_start;
 };
+
+static inline sector_t simplefs_file_start(const struct simplefs_sb_info *sbi,
+					   u32 index)
+{
+	return sbi->data_start + (sector_t)index * sbi->max_file_sectors;
+}
+
+static inline u64 simplefs_file_data_size(u32 sectors)
+{
+	return (u64)sectors * SIMPLEFS_SECTOR_SIZE - SIMPLEFS_META_SIZE;
+}
 
 extern char *disk_name;
 extern int sb_offset1;

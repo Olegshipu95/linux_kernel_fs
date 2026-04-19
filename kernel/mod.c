@@ -38,6 +38,29 @@ static const struct super_operations simplefs_sops = {
 
 const struct super_operations *simplefs_sops_ptr = &simplefs_sops;
 
+static int simplefs_validate_params(void)
+{
+	if (!disk_name) {
+		pr_err("simplefs: disk_name module parameter required\n");
+		return -EINVAL;
+	}
+	if (sb_offset1 < 0 || sb_offset2 < 0 || sb_offset1 == sb_offset2) {
+		pr_err("simplefs: invalid superblock offsets\n");
+		return -EINVAL;
+	}
+	if (max_filename_len <= 0 ||
+	    max_filename_len > sizeof(((struct simplefs_file_meta *)0)->name)) {
+		pr_err("simplefs: invalid max_filename_len\n");
+		return -EINVAL;
+	}
+	if (max_file_sectors <= 0 ||
+	    max_file_sectors > SIMPLEFS_MAX_FILE_SECTORS) {
+		pr_err("simplefs: invalid max_file_sectors\n");
+		return -EINVAL;
+	}
+	return 0;
+}
+
 static struct dentry *simplefs_mount(struct file_system_type *fs_type,
 				     int flags, const char *dev_name, void *data)
 {
@@ -55,21 +78,23 @@ static struct file_system_type simplefs_fs_type = {
 static int __init simplefs_init(void)
 {
 	struct block_device *bdev;
+	struct file *bdev_file;
 	struct simplefs_sb_info sbi;
 	struct simplefs_super_block sb;
 	int err;
 
-	if (!disk_name) {
-		pr_err("simplefs: disk_name module parameter required\n");
-		return -EINVAL;
-	}
+	err = simplefs_validate_params();
+	if (err)
+		return err;
 
-	bdev = blkdev_get_by_path(disk_name, BLK_OPEN_READ | BLK_OPEN_WRITE,
-				  NULL, NULL);
-	if (IS_ERR(bdev)) {
+	bdev_file = bdev_file_open_by_path(disk_name,
+					    BLK_OPEN_READ | BLK_OPEN_WRITE,
+					    NULL, NULL);
+	if (IS_ERR(bdev_file)) {
 		pr_err("simplefs: cannot open %s\n", disk_name);
-		return PTR_ERR(bdev);
+		return PTR_ERR(bdev_file);
 	}
+	bdev = file_bdev(bdev_file);
 
 	sbi.bdev = bdev;
 	sbi.sb_off1 = sb_offset1;
@@ -78,13 +103,13 @@ static int __init simplefs_init(void)
 	if (simplefs_read_super(&sbi, &sb)) {
 		err = simplefs_format_disk(bdev);
 		if (err) {
-			blkdev_put(bdev, NULL);
+			bdev_fput(bdev_file);
 			return err;
 		}
 		pr_info("simplefs: formatted %s\n", disk_name);
 	}
 
-	blkdev_put(bdev, NULL);
+	bdev_fput(bdev_file);
 
 	err = register_filesystem(&simplefs_fs_type);
 	if (err)

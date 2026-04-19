@@ -18,12 +18,14 @@ static int read_sb_at(struct block_device *bdev, sector_t off,
 {
 	struct buffer_head *bh;
 	const struct simplefs_super_block *disk;
+	unsigned int off_in_block;
 
-	bh = sb_bread(bdev, off);
+	bh = simplefs_bread_bdev_sector(bdev, off);
 	if (!bh)
 		return -EIO;
 
-	disk = (const struct simplefs_super_block *)bh->b_data;
+	off_in_block = simplefs_sector_block_offset(off);
+	disk = (const struct simplefs_super_block *)(bh->b_data + off_in_block);
 	memcpy(out, disk, sizeof(*out));
 	brelse(bh);
 	return 0;
@@ -33,12 +35,14 @@ static int write_sb_at(struct block_device *bdev, sector_t off,
 		       const struct simplefs_super_block *sb)
 {
 	struct buffer_head *bh;
+	unsigned int off_in_block;
 
-	bh = sb_bread(bdev, off);
+	bh = simplefs_bread_bdev_sector(bdev, off);
 	if (!bh)
 		return -EIO;
 
-	memcpy(bh->b_data, sb, sizeof(*sb));
+	off_in_block = simplefs_sector_block_offset(off);
+	memcpy(bh->b_data + off_in_block, sb, sizeof(*sb));
 	mark_buffer_dirty(bh);
 	sync_dirty_buffer(bh);
 	brelse(bh);
@@ -97,19 +101,27 @@ int simplefs_format_disk(struct block_device *bdev)
 	u32 file_count;
 	int err;
 
-	total = i_size_read(bdev->bd_inode) >> 9;
+	if (max_file_sectors <= 0 ||
+	    max_file_sectors > SIMPLEFS_MAX_FILE_SECTORS ||
+	    max_filename_len <= 0 ||
+	    max_filename_len > sizeof(((struct simplefs_file_meta *)0)->name) ||
+	    sb_offset1 < 0 || sb_offset2 < 0 || sb_offset1 == sb_offset2)
+		return -EINVAL;
+
+	total = bdev_nr_sectors(bdev);
 	off1 = sb_offset1;
 	off2 = sb_offset2;
 	data_start = (off1 > off2 ? off1 : off2) + 1;
-
-	if (data_start >= total)
+	if (off1 >= total || off2 >= total || data_start >= total)
 		return -EINVAL;
 
-	file_count = total - data_start;
+	file_count = div_u64(total - data_start, max_file_sectors);
+	if (!file_count)
+		return -EINVAL;
 
 	sb.magic = cpu_to_le32(SIMPLEFS_MAGIC);
 	sb.version = cpu_to_le32(SIMPLEFS_VERSION);
-	sb.sector_size = cpu_to_le32(512);
+	sb.sector_size = cpu_to_le32(SIMPLEFS_SECTOR_SIZE);
 	sb.max_filename_len = cpu_to_le32(max_filename_len);
 	sb.max_file_sectors = cpu_to_le32(max_file_sectors);
 	sb.total_sectors = cpu_to_le64(total);
@@ -131,7 +143,7 @@ int simplefs_format_disk(struct block_device *bdev)
 			.sb_off2 = off2,
 			.max_filename_len = max_filename_len,
 			.max_file_sectors = max_file_sectors,
-			.sector_size = 512,
+			.sector_size = SIMPLEFS_SECTOR_SIZE,
 			.file_count = file_count,
 			.data_start = data_start,
 		};
@@ -143,20 +155,24 @@ int simplefs_format_disk(struct block_device *bdev)
 			struct simplefs_file_meta meta = { 0 };
 			char fname[32];
 			struct buffer_head *bh;
-			sector_t sec = data_start + i;
+			sector_t sec = data_start +
+				       (sector_t)i * max_file_sectors;
+			unsigned int off_in_block;
 
 			snprintf(fname, sizeof(fname), "file%04u", i);
 			strncpy(meta.name, fname, max_filename_len - 1);
-			meta.sectors_used = 1;
+			meta.sectors_used = max_file_sectors;
 			meta.meta_crc = cpu_to_le32(simplefs_meta_crc(&meta,
 						max_filename_len));
 			meta.data_crc = cpu_to_le32(0);
 
-			bh = sb_bread(bdev, sec);
+			bh = simplefs_bread_bdev_sector(bdev, sec);
 			if (!bh)
 				return -EIO;
-			memset(bh->b_data, 0, 512);
-			memcpy(bh->b_data, &meta, sizeof(meta));
+			off_in_block = simplefs_sector_block_offset(sec);
+			memset(bh->b_data + off_in_block, 0,
+			       SIMPLEFS_SECTOR_SIZE);
+			memcpy(bh->b_data + off_in_block, &meta, sizeof(meta));
 			mark_buffer_dirty(bh);
 			sync_dirty_buffer(bh);
 			brelse(bh);
@@ -176,7 +192,7 @@ static sector_t file_sector(struct super_block *sb, u32 index)
 {
 	struct simplefs_sb_info *sbi = sb->s_fs_info;
 
-	return sbi->data_start + index;
+	return simplefs_file_start(sbi, index);
 }
 
 int simplefs_read_file_meta(struct super_block *sb, u32 index,
@@ -184,15 +200,17 @@ int simplefs_read_file_meta(struct super_block *sb, u32 index,
 {
 	struct simplefs_sb_info *sbi = sb->s_fs_info;
 	struct buffer_head *bh;
+	unsigned int off_in_block;
 
 	if (index >= sbi->file_count)
 		return -EINVAL;
 
-	bh = sb_bread(sbi->bdev, file_sector(sb, index));
+	bh = simplefs_bread_sb_sector(sb, file_sector(sb, index));
 	if (!bh)
 		return -EIO;
 
-	memcpy(meta, bh->b_data, sizeof(*meta));
+	off_in_block = simplefs_sector_block_offset(file_sector(sb, index));
+	memcpy(meta, bh->b_data + off_in_block, sizeof(*meta));
 	brelse(bh);
 
 	if (le32_to_cpu(meta->meta_crc) !=
@@ -208,6 +226,7 @@ int simplefs_write_file_meta(struct super_block *sb, u32 index,
 	struct simplefs_sb_info *sbi = sb->s_fs_info;
 	struct buffer_head *bh;
 	struct simplefs_file_meta m;
+	unsigned int off_in_block;
 
 	if (index >= sbi->file_count)
 		return -EINVAL;
@@ -215,11 +234,12 @@ int simplefs_write_file_meta(struct super_block *sb, u32 index,
 	m = *meta;
 	m.meta_crc = cpu_to_le32(simplefs_meta_crc(&m, sbi->max_filename_len));
 
-	bh = sb_bread(sbi->bdev, file_sector(sb, index));
+	bh = simplefs_bread_sb_sector(sb, file_sector(sb, index));
 	if (!bh)
 		return -EIO;
 
-	memcpy(bh->b_data, &m, sizeof(m));
+	off_in_block = simplefs_sector_block_offset(file_sector(sb, index));
+	memcpy(bh->b_data + off_in_block, &m, sizeof(m));
 	mark_buffer_dirty(bh);
 	sync_dirty_buffer(bh);
 	brelse(bh);
@@ -244,14 +264,20 @@ u32 simplefs_data_crc(struct super_block *sb, u32 index, u32 name_len)
 
 	for (i = 0; i < used; i++) {
 		sec = file_sector(sb, index) + i;
-		bh = sb_bread(sbi->bdev, sec);
+		bh = simplefs_bread_sb_sector(sb, sec);
 		if (!bh)
 			return 0;
 		if (i == 0)
-			crc = crc32_le(crc, bh->b_data + SIMPLEFS_META_SIZE,
+			crc = crc32_le(crc,
+				       bh->b_data +
+					       simplefs_sector_block_offset(sec) +
+					       SIMPLEFS_META_SIZE,
 				       sbi->sector_size - SIMPLEFS_META_SIZE);
 		else
-			crc = crc32_le(crc, bh->b_data, sbi->sector_size);
+			crc = crc32_le(crc,
+				       bh->b_data +
+					       simplefs_sector_block_offset(sec),
+				       sbi->sector_size);
 		brelse(bh);
 	}
 	return crc;
