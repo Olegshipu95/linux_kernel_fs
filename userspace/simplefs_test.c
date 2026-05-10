@@ -12,11 +12,7 @@
 #include <sys/ioctl.h>
 #include <time.h>
 
-#include "simplefs_ioctl.h"
-
-#ifndef SIMPLEFS_META_SIZE
-#define SIMPLEFS_META_SIZE 128
-#endif
+#include <simplefs_ioctl.h>
 
 static void usage(const char *prog)
 {
@@ -90,24 +86,44 @@ static int cmd_meta(const char *mnt)
 {
 	char path[PATH_MAX];
 	int fd, i, err = 0;
-	struct simplefs_meta_entry entries[4096];
+	struct simplefs_meta_req req;
+	struct simplefs_meta_entry *entries;
 
 	if (open_any_file(mnt, &fd, path, sizeof(path))) {
 		perror("open file for ioctl");
 		return 1;
 	}
-	memset(entries, 0, sizeof(entries));
-	if (ioctl(fd, SIMPLEFS_IOC_GET_META, entries)) {
+
+	memset(&req, 0, sizeof(req));
+	if (ioctl(fd, SIMPLEFS_IOC_GET_META, &req)) {
 		perror("GET_META");
 		close(fd);
 		return 1;
 	}
-	for (i = 0; i < 4096 && entries[i].name[0]; i++) {
+
+	entries = calloc(req.count, sizeof(*entries));
+	if (!entries) {
+		perror("calloc");
+		close(fd);
+		return 1;
+	}
+
+	req.capacity = req.count;
+	req.entries = (uint64_t)(uintptr_t)entries;
+	if (ioctl(fd, SIMPLEFS_IOC_GET_META, &req)) {
+		perror("GET_META");
+		free(entries);
+		close(fd);
+		return 1;
+	}
+
+	for (i = 0; i < (int)req.count && entries[i].name[0]; i++) {
 		printf("%s: sector=%u used=%u meta_crc=0x%08x data_crc=0x%08x\n",
 		       entries[i].name, entries[i].start_sector,
 		       entries[i].sectors_used, entries[i].meta_crc,
 		       entries[i].data_crc);
 	}
+	free(entries);
 	close(fd);
 	return err;
 }
@@ -131,7 +147,7 @@ static int cmd_map(const char *mnt, const char *name)
 	}
 	printf("%s: start=%u used=%u sectors:",
 	       req.name, req.start_sector, req.sectors_used);
-	for (i = 0; i < req.sectors_used && i < 64; i++)
+	for (i = 0; i < req.sectors_used && i < SIMPLEFS_MAX_FILE_SECTORS; i++)
 		printf(" %u", req.sectors[i]);
 	printf("\n");
 	close(fd);
@@ -167,7 +183,7 @@ static int run_demo(const char *mnt)
 		}
 
 		w = (uint32_t)random();
-		if (pwrite(fd, &w, sizeof(w), SIMPLEFS_META_SIZE) != sizeof(w)) {
+		if (pwrite(fd, &w, sizeof(w), 0) != sizeof(w)) {
 			perror("write");
 			failures++;
 			close(fd);
@@ -175,7 +191,7 @@ static int run_demo(const char *mnt)
 		}
 
 		r = 0;
-		n = pread(fd, &r, sizeof(r), SIMPLEFS_META_SIZE);
+		n = pread(fd, &r, sizeof(r), 0);
 		if (n != sizeof(r) || r != w) {
 			fprintf(stderr, "%s: mismatch wrote %u read %u\n",
 				path, w, r);
