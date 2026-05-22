@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _SIMPLEFS_IOCTL_H
 #define _SIMPLEFS_IOCTL_H
 

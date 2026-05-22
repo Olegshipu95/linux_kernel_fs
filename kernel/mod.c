@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/blkdev.h>
@@ -23,7 +22,7 @@ MODULE_PARM_DESC(max_filename_len, "Maximum file name length");
 
 int max_file_sectors = 1;
 module_param(max_file_sectors, int, 0444);
-MODULE_PARM_DESC(max_file_sectors, "Maximum file size in sectors (M)");
+MODULE_PARM_DESC(max_file_sectors, "Maximum file size in sectors");
 
 static void simplefs_put_super(struct super_block *sb)
 {
@@ -129,5 +128,3 @@ module_init(simplefs_init);
 module_exit(simplefs_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("SimpleFS homework");
-MODULE_DESCRIPTION("Simple sector-based filesystem");

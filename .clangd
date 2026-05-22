@@ -1,0 +1,10 @@
+CompileFlags:
+  Remove:
+    - -mpreferred-stack-boundary=*
+    - -mindirect-branch=*
+    - -mindirect-branch-register
+    - -fno-allow-store-data-races
+    - -fmin-function-alignment=*
+    - -fconserve-stack
+    - -fsanitize=*
+    - -mrecord-mcount
