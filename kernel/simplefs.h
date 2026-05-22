@@ -112,6 +112,9 @@ int simplefs_fill_super(struct super_block *sb, void *data, int silent);
 void simplefs_kill_sb(struct super_block *sb);
 int simplefs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		     struct iattr *attr);
+int simplefs_getattr(struct mnt_idmap *idmap, const struct path *path,
+		     struct kstat *stat, u32 request_mask,
+		     unsigned int query_flags);
 
 long simplefs_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 

@@ -6,6 +6,18 @@
 #include "simplefs.h"
 #include "../include/uapi/simplefs_ioctl.h"
 
+static void update_cached_inode_size(struct super_block *sb, u32 index,
+				     loff_t size)
+{
+	struct inode *inode;
+
+	inode = ilookup(sb, index + 2);
+	if (!inode)
+		return;
+	i_size_write(inode, size);
+	iput(inode);
+}
+
 static int find_file_index(struct super_block *sb, const char *name, u32 *out)
 {
 	struct simplefs_sb_info *sbi = sb->s_fs_info;
@@ -64,6 +76,7 @@ static int ioctl_zero_files(struct super_block *sb)
 		meta.data_crc = cpu_to_le32(0);
 		if (simplefs_write_file_meta(sb, i, &meta))
 			return -EIO;
+		update_cached_inode_size(sb, i, 0);
 	}
 	return 0;
 }
@@ -73,6 +86,7 @@ static int ioctl_wipe_fs(struct super_block *sb)
 	struct simplefs_sb_info *sbi = sb->s_fs_info;
 
 	int err;
+	u32 i;
 
 	err = simplefs_format_disk(sbi->bdev);
 	if (err)
@@ -82,6 +96,8 @@ static int ioctl_wipe_fs(struct super_block *sb)
 		return err;
 	sbi->file_count = le32_to_cpu(sbi->sb.file_count);
 	sbi->data_start = le32_to_cpu(sbi->sb.data_start_sector);
+	for (i = 0; i < sbi->file_count; i++)
+		update_cached_inode_size(sb, i, 0);
 	return 0;
 }
 

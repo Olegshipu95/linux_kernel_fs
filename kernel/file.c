@@ -129,11 +129,11 @@ static ssize_t simplefs_write_file(struct file *file, const char __user *buf,
 	if (file->f_flags & O_APPEND)
 		*ppos = min_t(u32, le32_to_cpu(meta.data_size), max_size);
 	if ((u64)*ppos >= max_size)
-		return 0;
+		return -ENOSPC;
 	if (len > max_size - (u64)*ppos)
 		len = max_size - (u64)*ppos;
 	if ((ssize_t)len <= 0)
-		return 0;
+		return -ENOSPC;
 
 	while (done < len) {
 		u64 phys_pos = *ppos + done + SIMPLEFS_META_SIZE;

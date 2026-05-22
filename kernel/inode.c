@@ -132,8 +132,30 @@ const struct file_operations simplefs_dir_ops = {
 };
 
 const struct inode_operations simplefs_inode_ops = {
+	.getattr = simplefs_getattr,
 	.setattr = simplefs_setattr,
 };
+
+int simplefs_getattr(struct mnt_idmap *idmap, const struct path *path,
+		     struct kstat *stat, u32 request_mask,
+		     unsigned int query_flags)
+{
+	struct inode *inode = d_inode(path->dentry);
+
+	if (S_ISREG(inode->i_mode) && inode->i_ino >= 2) {
+		struct simplefs_file_meta meta;
+
+		if (!simplefs_read_file_meta(inode->i_sb, inode->i_ino - 2,
+					     &meta))
+			i_size_write(inode,
+				     min_t(u64, le32_to_cpu(meta.data_size),
+					   simplefs_file_data_size(
+						   meta.sectors_used)));
+	}
+
+	generic_fillattr(idmap, request_mask, inode, stat);
+	return 0;
+}
 
 int simplefs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		     struct iattr *attr)
