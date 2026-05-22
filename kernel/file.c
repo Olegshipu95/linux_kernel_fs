@@ -65,11 +65,14 @@ static ssize_t simplefs_read_file(struct file *file, char __user *buf,
 	if (err)
 		return err;
 
-	file_size = simplefs_file_data_size(meta.sectors_used);
-	if (*ppos >= file_size)
+	file_size = min_t(u64, le32_to_cpu(meta.data_size),
+			  simplefs_file_data_size(meta.sectors_used));
+	if (*ppos < 0)
+		return -EINVAL;
+	if ((u64)*ppos >= file_size)
 		return 0;
-	if (len > file_size - *ppos)
-		len = file_size - *ppos;
+	if (len > file_size - (u64)*ppos)
+		len = file_size - (u64)*ppos;
 
 	while (done < len) {
 		u64 phys_pos = *ppos + done + SIMPLEFS_META_SIZE;
@@ -113,6 +116,7 @@ static ssize_t simplefs_write_file(struct file *file, const char __user *buf,
 	struct simplefs_file_meta meta;
 	u32 index = inode_to_index(inode);
 	size_t max_size, done = 0;
+	u32 data_size;
 	int err;
 
 	err = simplefs_read_file_meta(sb, index, &meta);
@@ -120,8 +124,14 @@ static ssize_t simplefs_write_file(struct file *file, const char __user *buf,
 		return err;
 
 	max_size = simplefs_file_data_size(meta.sectors_used);
-	if (*ppos + len > max_size)
-		len = max_size - *ppos;
+	if (*ppos < 0)
+		return -EINVAL;
+	if (file->f_flags & O_APPEND)
+		*ppos = min_t(u32, le32_to_cpu(meta.data_size), max_size);
+	if ((u64)*ppos >= max_size)
+		return 0;
+	if (len > max_size - (u64)*ppos)
+		len = max_size - (u64)*ppos;
 	if ((ssize_t)len <= 0)
 		return 0;
 
@@ -150,6 +160,8 @@ static ssize_t simplefs_write_file(struct file *file, const char __user *buf,
 		done += chunk;
 	}
 
+	data_size = max_t(u32, le32_to_cpu(meta.data_size), *ppos + done);
+	meta.data_size = cpu_to_le32(data_size);
 	meta.data_crc = cpu_to_le32(simplefs_data_crc(sb, index,
 						      sbi->max_filename_len));
 	err = simplefs_write_file_meta(sb, index, &meta);
@@ -157,6 +169,7 @@ static ssize_t simplefs_write_file(struct file *file, const char __user *buf,
 		return err;
 
 	*ppos += done;
+	i_size_write(inode, data_size);
 	return done;
 }
 

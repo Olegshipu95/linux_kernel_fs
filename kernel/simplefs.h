@@ -7,7 +7,7 @@
 #include <linux/buffer_head.h>
 
 #define SIMPLEFS_MAGIC		0x53465331 /* "SFS1" */
-#define SIMPLEFS_VERSION	1
+#define SIMPLEFS_VERSION	2
 #define SIMPLEFS_ROOT_INO	1
 
 #define SIMPLEFS_SECTOR_SIZE	512
@@ -57,6 +57,7 @@ struct simplefs_file_meta {
 	char name[64];
 	__u8 sectors_used;
 	__u8 reserved[3];
+	__le32 data_size;
 	__le32 meta_crc;
 	__le32 data_crc;
 };
@@ -109,6 +110,8 @@ extern const struct file_operations simplefs_dir_ops;
 
 int simplefs_fill_super(struct super_block *sb, void *data, int silent);
 void simplefs_kill_sb(struct super_block *sb);
+int simplefs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
+		     struct iattr *attr);
 
 long simplefs_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 

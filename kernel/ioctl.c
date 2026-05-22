@@ -60,6 +60,7 @@ static int ioctl_zero_files(struct super_block *sb)
 			sync_dirty_buffer(bh);
 			brelse(bh);
 		}
+		meta.data_size = cpu_to_le32(0);
 		meta.data_crc = cpu_to_le32(0);
 		if (simplefs_write_file_meta(sb, i, &meta))
 			return -EIO;
@@ -122,6 +123,7 @@ static int ioctl_get_meta(struct file *file, unsigned long arg)
 		strncpy(entry.name, meta.name, SIMPLEFS_MAX_NAME - 1);
 		entry.start_sector = simplefs_file_start(sbi, i);
 		entry.sectors_used = meta.sectors_used;
+		entry.data_size = le32_to_cpu(meta.data_size);
 		entry.meta_crc = le32_to_cpu(meta.meta_crc);
 		entry.data_crc = le32_to_cpu(meta.data_crc);
 

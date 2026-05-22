@@ -162,6 +162,7 @@ int simplefs_format_disk(struct block_device *bdev)
 			snprintf(fname, sizeof(fname), "file%04u", i);
 			strncpy(meta.name, fname, max_filename_len - 1);
 			meta.sectors_used = max_file_sectors;
+			meta.data_size = cpu_to_le32(0);
 			meta.meta_crc = cpu_to_le32(simplefs_meta_crc(&meta,
 						max_filename_len));
 			meta.data_crc = cpu_to_le32(0);

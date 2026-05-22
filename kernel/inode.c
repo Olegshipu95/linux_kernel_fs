@@ -49,7 +49,16 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 
 	inode->i_op = &simplefs_inode_ops;
 	inode->i_fop = &simplefs_file_ops;
-	inode->i_size = simplefs_file_data_size(sbi->max_file_sectors);
+	{
+		struct simplefs_file_meta meta;
+
+		if (!simplefs_read_file_meta(sb, ino - 2, &meta))
+			inode->i_size = min_t(u64, le32_to_cpu(meta.data_size),
+					      simplefs_file_data_size(
+						      meta.sectors_used));
+		else
+			inode->i_size = 0;
+	}
 	return inode;
 }
 
@@ -123,8 +132,48 @@ const struct file_operations simplefs_dir_ops = {
 };
 
 const struct inode_operations simplefs_inode_ops = {
-	.setattr = simple_setattr,
+	.setattr = simplefs_setattr,
 };
+
+int simplefs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
+		     struct iattr *attr)
+{
+	struct inode *inode = d_inode(dentry);
+	struct super_block *sb = inode->i_sb;
+	struct simplefs_sb_info *sbi = sb->s_fs_info;
+	struct simplefs_file_meta meta;
+	u32 index = inode->i_ino - 2;
+	u64 capacity;
+	int err;
+
+	err = setattr_prepare(idmap, dentry, attr);
+	if (err)
+		return err;
+
+	if (attr->ia_valid & ATTR_SIZE) {
+		err = simplefs_read_file_meta(sb, index, &meta);
+		if (err)
+			return err;
+
+		capacity = simplefs_file_data_size(meta.sectors_used);
+		if (attr->ia_size > capacity)
+			return -EFBIG;
+
+		meta.data_size = cpu_to_le32(attr->ia_size);
+		if (!attr->ia_size)
+			meta.data_crc = cpu_to_le32(0);
+		else
+			meta.data_crc = cpu_to_le32(simplefs_data_crc(sb, index,
+						      sbi->max_filename_len));
+
+		err = simplefs_write_file_meta(sb, index, &meta);
+		if (err)
+			return err;
+	}
+
+	setattr_copy(idmap, inode, attr);
+	return 0;
+}
 
 int simplefs_fill_super(struct super_block *sb, void *data, int silent)
 {
@@ -158,7 +207,7 @@ int simplefs_fill_super(struct super_block *sb, void *data, int silent)
 		kfree(sbi);
 		return -EINVAL;
 	}
-	sb->s_maxbytes = sbi->max_file_sectors * (u64)sbi->sector_size;
+	sb->s_maxbytes = simplefs_file_data_size(sbi->max_file_sectors);
 	sb->s_op = simplefs_sops_ptr;
 
 	root = simplefs_iget(sb, SIMPLEFS_ROOT_INO);

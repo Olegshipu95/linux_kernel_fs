@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-MOUNTPOINT="${SIMPLEFS_MOUNT:-/mnt}"
+MOUNTPOINT="${SIMPLEFS_MOUNT:-/mnt/simplefs_test}"
 LOOP_STATE="${SIMPLEFS_LOOP_STATE:-.simplefs_loop}"
 LOOP="${SIMPLEFS_LOOP:-}"
 MAX_FILE_SECTORS="${SIMPLEFS_MAX_FILE_SECTORS:-1}"

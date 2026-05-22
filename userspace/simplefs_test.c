@@ -118,10 +118,10 @@ static int cmd_meta(const char *mnt)
 	}
 
 	for (i = 0; i < (int)req.count && entries[i].name[0]; i++) {
-		printf("%s: sector=%u used=%u meta_crc=0x%08x data_crc=0x%08x\n",
+		printf("%s: sector=%u used=%u size=%u meta_crc=0x%08x data_crc=0x%08x\n",
 		       entries[i].name, entries[i].start_sector,
-		       entries[i].sectors_used, entries[i].meta_crc,
-		       entries[i].data_crc);
+		       entries[i].sectors_used, entries[i].data_size,
+		       entries[i].meta_crc, entries[i].data_crc);
 	}
 	free(entries);
 	close(fd);

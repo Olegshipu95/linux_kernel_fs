@@ -21,6 +21,7 @@ struct simplefs_meta_entry {
 	__u32 start_sector;
 	__u8 sectors_used;
 	__u8 pad[3];
+	__u32 data_size;
 	__u32 meta_crc;
 	__u32 data_crc;
 };
