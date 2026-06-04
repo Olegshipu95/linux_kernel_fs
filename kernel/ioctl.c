@@ -1,4 +1,5 @@
 #include <linux/blkdev.h>
+#include <linux/dcache.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 
@@ -87,9 +88,7 @@ static int
 ioctl_wipe_fs (struct super_block *sb)
 {
   struct simplefs_sb_info *sbi = sb->s_fs_info;
-
   int err;
-  u32 i;
 
   err = simplefs_format_disk (sbi->bdev);
   if (err)
@@ -99,8 +98,14 @@ ioctl_wipe_fs (struct super_block *sb)
     return err;
   sbi->file_count = le32_to_cpu (sbi->sb.file_count);
   sbi->data_start = le32_to_cpu (sbi->sb.data_start_sector);
-  for (i = 0; i < sbi->file_count; i++)
-    update_cached_inode_size (sb, i, 0);
+  sbi->max_filename_len = le32_to_cpu (sbi->sb.max_filename_len);
+  sbi->max_file_sectors = le32_to_cpu (sbi->sb.max_file_sectors);
+
+  sync_filesystem (sb);
+  invalidate_bdev (sb->s_bdev);
+  shrink_dcache_sb (sb);
+  evict_inodes (sb);
+
   return 0;
 }
 
