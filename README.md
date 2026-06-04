@@ -17,6 +17,8 @@ file_capacity = max_file_sectors * 512 - 128
 
 Первые 128 байт первого сектора файла заняты metadata, но для userspace offset 0 соответствует первому байту пользовательских данных, так что можно сказать, что пользователь этого не видит 
 
+Имена файлов при форматировании: `file0`, `file1`, … (без ведущих нулей).
+
 Текущая длина пользовательских данных хранится отдельно в metadata, поэтому обычные операции типа `>` и `>>` работают с логическим размером файла (с append было нелегко разобраться, но оно работает).
 
 ## Параметры модуля для того, чтоб вы могли сделать insmode. Можете подробнее почитать в условии
@@ -129,7 +131,7 @@ ls -la /mnt/simplefs_test
 
 ```bash
 ./userspace/simplefs_test /mnt/simplefs_test meta
-./userspace/simplefs_test /mnt/simplefs_test map file0000
+./userspace/simplefs_test /mnt/simplefs_test map file0
 ./userspace/simplefs_test /mnt/simplefs_test zero
 ./userspace/simplefs_test /mnt/simplefs_test wipe
 ```

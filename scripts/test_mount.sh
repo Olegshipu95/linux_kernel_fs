@@ -39,7 +39,7 @@ ls -la "$MOUNTPOINT" | sed -n '1,20p'
 
 ./userspace/simplefs_test "$MOUNTPOINT"
 ./userspace/simplefs_test "$MOUNTPOINT" meta | sed -n '1,10p'
-./userspace/simplefs_test "$MOUNTPOINT" map file0000
+./userspace/simplefs_test "$MOUNTPOINT" map file0
 ./userspace/simplefs_test "$MOUNTPOINT" zero
 ./userspace/simplefs_test "$MOUNTPOINT" wipe
 

@@ -126,6 +126,15 @@ simplefs_format_disk (struct block_device *bdev)
   if (!file_count)
     return -EINVAL;
 
+  {
+    char probe[32];
+    unsigned int nlen
+        = snprintf (probe, sizeof (probe), "file%u", file_count - 1);
+
+    if (nlen >= max_filename_len)
+      return -EINVAL;
+  }
+
   sb.magic = cpu_to_le32 (SIMPLEFS_MAGIC);
   sb.version = cpu_to_le32 (SIMPLEFS_VERSION);
   sb.sector_size = cpu_to_le32 (SIMPLEFS_SECTOR_SIZE);
@@ -166,7 +175,7 @@ simplefs_format_disk (struct block_device *bdev)
         sector_t sec = data_start + (sector_t)i * max_file_sectors;
         unsigned int off_in_block;
 
-        snprintf (fname, sizeof (fname), "file%04u", i);
+        snprintf (fname, sizeof (fname), "file%u", i);
         strncpy (meta.name, fname, max_filename_len - 1);
         meta.sectors_used = max_file_sectors;
         meta.data_size = cpu_to_le32 (0);
